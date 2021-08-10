@@ -1,11 +1,12 @@
 import Decryptor from './decrypt';
 import * as config from './config.json';
 import { decryptWithPrivateKey } from 'eth-crypto';
-import { Arcana, hasher2Hex, fromHexString, AESDecrypt, makeTx } from './Utils';
+import { Arcana, hasher2Hex, fromHexString, AESDecrypt, makeTx, decryptKey } from './Utils';
 import { utils, Wallet } from 'ethers';
 import FileWriter from './FileWriter';
 import { readHash } from './constant';
 import Sha256 from './SHA256';
+import { ArcanaOptions } from './Interfaces';
 
 const downloadBlob = (blob, fileName) => {
   if (navigator.msSaveBlob) {
@@ -35,21 +36,21 @@ export class Downloader {
   private wallet: any;
   private convergence: string;
   private hasher;
+  private opts: ArcanaOptions;
 
-  constructor(wallet: any, convergence: string) {
+  constructor(wallet: any, convergence: string, opts: ArcanaOptions) {
     this.wallet = wallet;
     this.convergence = convergence;
     this.hasher = new Sha256();
+    this.opts = opts;
   }
 
   download = async (did) => {
     const arcana = Arcana(this.wallet);
     let file = await arcana.getFile(did, readHash);
     await makeTx(this.wallet, 'checkPermission', [did, readHash]);
-    const decryptedKey = await decryptWithPrivateKey(
-      this.wallet.privateKey,
-      JSON.parse(utils.toUtf8String(file.encryptedKey)),
-    );
+    const decryptedKey = await decryptKey(this.wallet, utils.toUtf8String(file.encryptedKey), this.opts.metamask);
+    console.log('decrypted key', decryptedKey);
     const key = await window.crypto.subtle.importKey('raw', fromHexString(decryptedKey), 'AES-CTR', false, [
       'encrypt',
       'decrypt',

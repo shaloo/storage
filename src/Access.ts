@@ -1,13 +1,16 @@
 import { utils } from 'ethers';
 import { readHash } from './constant';
+import { ArcanaOptions } from './Interfaces';
 import { makeTx, getEncryptedKey, decryptKey, encryptKey } from './Utils';
 
 export class Access {
   private wallet: any;
   private convergence: string;
-  constructor(wallet: any, convergence: string) {
+  private opts: ArcanaOptions;
+  constructor(wallet: any, convergence: string, opts: ArcanaOptions) {
     this.wallet = wallet;
     this.convergence = convergence;
+    this.opts = opts;
   }
 
   share = async (fileId: string[], publicKey: string[], validity: number[]): Promise<string> => {
@@ -17,12 +20,12 @@ export class Access {
     await Promise.all(
       fileId.map(async (f) => {
         const EK = await getEncryptedKey(f);
-        const key = await decryptKey(this.wallet.privateKey, EK);
+        const key = await decryptKey(this.wallet, EK, this.opts.metamask);
         await Promise.all(
           publicKey.map(async (p) => {
             const pubKey = p.slice(p.length - 128);
             address.push(utils.computeAddress(p));
-            encryptedKey.push(await encryptKey(pubKey, key));
+            encryptedKey.push(await encryptKey(this.wallet, key, this.opts.metamask));
             accessType.push(readHash);
           }),
         );

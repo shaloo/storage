@@ -7,15 +7,18 @@ import { Downloader } from './Downloader';
 import { Access } from './Access';
 import * as utils from './Utils';
 import { Wallet } from 'ethers';
+import { ArcanaOptions } from './Interfaces';
 
 export class Arcana {
   private wallet: Wallet;
   private convergence: string;
-  constructor(wallet: any) {
+  private opts: ArcanaOptions;
+  constructor(wallet: any, opts: ArcanaOptions | undefined) {
     this.wallet = wallet;
     if (!this.wallet) {
       throw 'Null wallet';
     }
+    this.opts = opts ? opts : { metamask: false };
   }
 
   setConvergence = async () => {
@@ -32,17 +35,17 @@ export class Arcana {
 
   getUploader = async () => {
     await this.setConvergence();
-    return new Uploader(this.wallet, this.convergence);
+    return new Uploader(this.wallet, this.convergence, this.opts);
   };
 
   getAccess = async () => {
     await this.setConvergence();
-    return new Access(this.wallet, this.convergence);
+    return new Access(this.wallet, this.convergence, this.opts);
   };
 
   getDownloader = async () => {
     await this.setConvergence();
-    return new Downloader(this.wallet, this.convergence);
+    return new Downloader(this.wallet, this.convergence, this.opts);
   };
 }
 export { utils };

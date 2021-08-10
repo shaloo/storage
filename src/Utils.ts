@@ -3,7 +3,9 @@ import Sha256 from './SHA256';
 import { Contract, providers, Wallet, utils, Bytes } from 'ethers';
 import * as config from './config.json';
 import * as arcana from './contracts/Arcana.json';
-import { encryptWithPublicKey, decryptWithPrivateKey } from 'eth-crypto';
+import { box, randomBytes } from 'tweetnacl';
+import { encodeBase64, decodeBase64, decodeUTF8, encodeUTF8 } from 'tweetnacl-util';
+import { MessageTypes, MsgParams, TypedMessage, TypedData, EthEncryptedData } from './Interfaces';
 
 export class KeyGen {
   hasher: any;
@@ -60,6 +62,49 @@ export class KeyGen {
   };
 }
 
+function encrypt<T extends MessageTypes>(
+  receiverPublicKey: string,
+  msgParams: MsgParams<TypedData | TypedMessage<T>>,
+  version: string,
+): EthEncryptedData {
+  switch (version) {
+    case 'x25519-xsalsa20-poly1305': {
+      if (typeof msgParams.data !== 'string') {
+        throw new Error('Cannot detect secret message, message params should be of the form {data: "secret message"} ');
+      }
+      // generate ephemeral keypair
+      const ephemeralKeyPair = box.keyPair();
+
+      // assemble encryption parameters - from string to UInt8
+      let pubKeyUInt8Array;
+      try {
+        pubKeyUInt8Array = decodeBase64(receiverPublicKey);
+      } catch (err) {
+        throw new Error('Bad public key');
+      }
+
+      const msgParamsUInt8Array = decodeUTF8(msgParams.data);
+      const nonce = randomBytes(box.nonceLength);
+
+      // encrypt
+      const encryptedMessage = box(msgParamsUInt8Array, nonce, pubKeyUInt8Array, ephemeralKeyPair.secretKey);
+
+      // handle encrypted data
+      const output = {
+        version: 'x25519-xsalsa20-poly1305',
+        nonce: encodeBase64(nonce),
+        ephemPublicKey: encodeBase64(ephemeralKeyPair.publicKey),
+        ciphertext: encodeBase64(encryptedMessage),
+      };
+      // return encrypted msg data
+      return output;
+    }
+
+    default:
+      throw new Error('Encryption type/version not supported');
+  }
+}
+
 export const hasher2Hex = (digest) => {
   return digest.map((x) => x.toString(16).padStart(2, '0')).join('');
 };
@@ -69,13 +114,6 @@ export const fromHexString = (hexString: string): Uint8Array =>
 
 export const toHexString = (bytes: ArrayBuffer): string =>
   new Uint8Array(bytes).reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '');
-
-interface encryptedI {
-  ciphertext: string;
-  ephemPublicKey: string;
-  iv: string;
-  mac: string;
-}
 
 export const Arcana = (wallet?: Wallet): Contract => {
   const provider = new providers.JsonRpcProvider(config.rpc);
@@ -137,13 +175,40 @@ export const createChildKey = async (privateKey: string, index: number) => {
   return getWallet(toHexString(signature));
 };
 
-export const encryptKey = async (publicKey: string, key: string): Promise<Bytes> => {
-  const encrypted = await encryptWithPublicKey(publicKey.substring(publicKey.length - 128), key);
+export const encryptKey = async (wallet: Wallet, key: string, metamask: boolean): Promise<Bytes> => {
+  let pubKey;
+  if (!metamask) {
+    pubKey = await getEncryptionPublicKey(wallet, metamask);
+  } else {
+  }
+  const encrypted = await encrypt(pubKey, { data: key }, 'x25519-xsalsa20-poly1305');
   return utils.toUtf8Bytes(JSON.stringify(encrypted));
 };
 
-export const decryptKey = async (privateKey: string, encryptedKey: string): Promise<string> => {
-  return await decryptWithPrivateKey(privateKey, JSON.parse(encryptedKey));
+export const encryptFromPubKey = async (pubKey: string, key: string): Promise<Bytes> => {
+  const encrypted = await encrypt(pubKey, { data: key }, 'x25519-xsalsa20-poly1305');
+  return utils.toUtf8Bytes(JSON.stringify(encrypted));
+}
+
+export const decryptKey = async (wallet: Wallet, encryptedKey: string, metamask: boolean): Promise<string> => {
+  let key: string;
+  if (!metamask) {
+    const encryptedData = JSON.parse(encryptedKey);
+    const nonce = decodeBase64(encryptedData.nonce);
+    const ciphertext = decodeBase64(encryptedData.ciphertext);
+    const ephemPublicKey = decodeBase64(encryptedData.ephemPublicKey);
+    console.log('wallet', wallet.address, wallet.privateKey);
+    const decryptedMessage = box.open(
+      ciphertext,
+      nonce,
+      ephemPublicKey,
+      nacl_decodeHex(wallet.privateKey.substring(wallet.privateKey.length - 64, wallet.privateKey.length)),
+    );
+    console.log(decryptedMessage);
+    key = encodeUTF8(decryptedMessage);
+    console.log('key', key);
+  }
+  return key;
 };
 
 export const getEncryptedKey = async (fileId: string): Promise<string> => {
@@ -236,3 +301,18 @@ export class Api {
     return this.accessToken;
   };
 }
+
+function nacl_decodeHex(msgHex) {
+  const msgBase64 = Buffer.from(msgHex, 'hex').toString('base64');
+  return decodeBase64(msgBase64);
+}
+
+export const getEncryptionPublicKey = async (wallet: Wallet, metamask: boolean): Promise<string> => {
+  if (!metamask) {
+    const privateKeyUint8Array = nacl_decodeHex(
+      wallet.privateKey.substring(wallet.privateKey.length - 64, wallet.privateKey.length),
+    );
+    const encryptionPublicKey = box.keyPair.fromSecretKey(privateKeyUint8Array).publicKey;
+    return encodeBase64(encryptionPublicKey);
+  }
+};

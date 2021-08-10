@@ -3,13 +3,16 @@ import * as tus from 'tus-js-client';
 import FileReader from './fileReader';
 import { utils, BigNumber } from 'ethers';
 import * as config from './config.json';
+import { ArcanaOptions } from './Interfaces';
 
 export class Uploader {
   private wallet: any;
   private convergence: string;
-  constructor(wallet: any, convergence: string) {
+  private opts: ArcanaOptions;
+  constructor(wallet: any, convergence: string, opts: ArcanaOptions) {
     this.wallet = wallet;
     this.convergence = convergence;
+    this.opts = opts;
   }
 
   onSuccess = () => {};
@@ -32,7 +35,7 @@ export class Uploader {
     const wallet = this.wallet;
 
     if (prevKey) {
-      const decryptedKey = await decryptKey(this.wallet.privateKey, prevKey);
+      const decryptedKey = await decryptKey(this.wallet, prevKey, this.opts.metamask);
       key = await window.crypto.subtle.importKey('raw', fromHexString(decryptedKey), 'AES-CTR', false, ['encrypt']);
     } else {
       key = await window.crypto.subtle.generateKey(
@@ -46,7 +49,7 @@ export class Uploader {
       const aes_raw = await crypto.subtle.exportKey('raw', key);
       const hexString = toHexString(aes_raw);
 
-      const encryptedKey = await encryptKey(this.wallet._signingKey().publicKey, hexString);
+      const encryptedKey = await encryptKey(this.wallet, hexString,this.opts.metamask);
 
       const encryptedMetaData = await AESEncrypt(
         key,
